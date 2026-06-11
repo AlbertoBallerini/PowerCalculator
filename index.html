@@ -365,10 +365,12 @@
 
     <footer>
       Modello: P = v/&eta; &middot; [ m&middot;g&middot;(sin&theta; + Crr&middot;cos&theta;)
-      + &frac12;&middot;&rho;&middot;CdA&middot;v&sup2; ], &theta; = arctan(pendenza%/100).
-      In discesa a ruota libera il bilancio netto &egrave; riferito alla ruota.
-      kcal stimate con rendimento metabolico 24%. Tempo &harr; velocit&agrave;
-      accoppiati tramite la distanza. Modalit&agrave; inversa risolta per bisezione.
+      + &frac12;&middot;&rho;&middot;CdA&middot;(v+v<sub>w</sub>)&middot;|v+v<sub>w</sub>| ],
+      &theta; = arctan(pendenza%/100), v<sub>w</sub> = vento (positivo se contrario).
+      A ruota libera (discesa o vento a favore) il bilancio netto &egrave;
+      riferito alla ruota. kcal stimate con rendimento metabolico 24%.
+      Tempo &harr; velocit&agrave; accoppiati tramite la distanza.
+      Modalit&agrave; inversa risolta per bisezione.
     </footer>
   </main>
 
@@ -381,7 +383,9 @@
       const m = p.rider + p.bike;
       const v = p.speed / 3.6;
       const th = Math.atan(p.grade / 100);
-      const pa = 0.5 * p.rho * p.cda * v * v * v;
+      const vw = (p.wind || 0) / 3.6;   // vento: positivo = contrario
+      const va = v + vw;
+      const pa = 0.5 * p.rho * p.cda * va * Math.abs(va) * v;
       const pr = m * G * p.crr * Math.cos(th) * v;
       const pg = m * G * Math.sin(th) * v;
       const wn = pa + pr + pg;
@@ -432,6 +436,10 @@
       {
         k: "grade", lab: "Pendenza media [%]", min: -10, max: 15,
         step: 0.1, def: 0
+      },
+      {
+        k: "wind", lab: "Vento contrario [km/h]", min: -40, max: 40,
+        step: 1, def: 0
       },
       {
         k: "crr", lab: "Crr rotolamento", min: 0.002, max: 0.012,
@@ -707,13 +715,13 @@
       $("r-energy").textContent = "Energia: " + Math.round(r.ekj) +
         " kJ  (\u2248 " + Math.round(r.kcal) + " kcal bruciate)";
       $("note").textContent = r.pnet < 0
-        ? "In discesa la gravit\u00e0 supera le resistenze (" +
+        ? "Discesa e/o vento a favore superano le resistenze (" +
         Math.round(r.pnet) + " W netti): si procede a ruota libera senza pedalare."
         : "";
 
-      const vmax = Math.max(r.paero, r.proll, Math.abs(r.pgrav), 1);
-      $("b-a").style.width = (r.paero / vmax * 100) + "%";
-      $("w-a").textContent = Math.round(r.paero) + " W";
+      const vmax = Math.max(Math.abs(r.paero), r.proll, Math.abs(r.pgrav), 1);
+      $("b-a").style.width = (Math.abs(r.paero) / vmax * 100) + "%";
+      $("w-a").textContent = (r.paero >= 0 ? "+" : "") + Math.round(r.paero) + " W";
       $("b-r").style.width = (r.proll / vmax * 100) + "%";
       $("w-r").textContent = Math.round(r.proll) + " W";
       $("b-g").style.width = (Math.abs(r.pgrav) / vmax * 100) + "%";
