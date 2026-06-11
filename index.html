@@ -303,9 +303,38 @@
         potenza da velocit&agrave;/tempo</label>
       <label><input type="radio" name="mode" value="inverse">
         velocit&agrave; e tempo da potenza</label>
+      <label><input type="radio" name="mode" value="course">
+        percorso a tratti</label>
     </div>
 
     <section id="params"></section>
+
+    <section id="course" style="display:none">
+      <div class="subhead">Tratti del percorso (a potenza costante)</div>
+      <table class="sens" id="segtable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>km</th>
+            <th>pend. %</th>
+            <th>v [km/h]</th>
+            <th>tempo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="segbody"></tbody>
+        <tfoot>
+          <tr id="segtotal"></tr>
+        </tfoot>
+      </table>
+      <div class="tnote">* velocit&agrave; limitata dal tetto in discesa</div>
+      <div class="sweepctl" style="margin-top:8px">
+        <button class="preset" id="addseg">+ aggiungi tratto</button>
+        vel. max discesa <input id="vmax" inputmode="decimal"> km/h
+      </div>
+      <div class="plotwrap" id="profile" style="margin-top:6px"></div>
+    </section>
+
     <div class="subhead">Parametri avanzati</div>
     <section id="advanced"></section>
 
@@ -319,7 +348,7 @@
     </div>
     <div id="note"></div>
 
-    <div class="subhead">Ripartizione della potenza alla ruota</div>
+    <div class="subhead" id="bd-head">Ripartizione della potenza alla ruota</div>
     <div class="barrow"><span>Aerodinamica</span>
       <div class="bartrack">
         <div id="b-a" style="background:var(--aero)"></div>
@@ -354,7 +383,7 @@
               <th>Valore</th>
               <th id="th-out">P [W]</th>
               <th id="th-d">&Delta;P [W]</th>
-              <th>Tempo</th>
+              <th id="th-t">Tempo</th>
             </tr>
           </thead>
           <tbody id="sensbody"></tbody>
@@ -409,6 +438,35 @@
         if (pedal(mid) < target) lo = mid; else hi = mid;
       }
       return 0.5 * (lo + hi);
+    }
+
+    function simulateCourse(p, segs, target, vmaxKmh) {
+      const cap = vmaxKmh > 0 ? vmaxKmh : Infinity;
+      const out = { segs: [], dist: 0, timeh: 0, ekj: 0, eaero: 0,
+                    eroll: 0, egrav: 0, climb: 0, capped: 0, coasting: 0 };
+      for (const s of segs) {
+        if (!(s.d > 0)) continue;
+        const vs = solveSpeed(Object.assign({}, p, { grade: s.g }),
+          Math.max(target, 1));
+        const v = Math.min(vs, cap);
+        const r = compute(Object.assign({}, p,
+          { grade: s.g, speed: v, distance: s.d }));
+        out.segs.push({ d: s.d, g: s.g, v: v, timeh: r.timeh,
+                        power: r.power, capped: vs > cap });
+        out.dist += s.d;
+        out.timeh += r.timeh;
+        out.ekj += r.ekj;
+        out.eaero += r.paero * r.timeh * 3.6;
+        out.eroll += r.proll * r.timeh * 3.6;
+        out.egrav += r.pgrav * r.timeh * 3.6;
+        if (s.g > 0) out.climb += s.d * 1000 * Math.sin(Math.atan(s.g / 100));
+        if (vs > cap) out.capped++;
+        if (r.power <= 0) out.coasting++;
+      }
+      out.vavg = out.timeh > 0 ? out.dist / out.timeh : 0;
+      out.kcal = out.ekj / 4.184 / 0.24;
+      out.pavg = out.timeh > 0 ? out.ekj / 3.6 / out.timeh : 0;
+      return out;
     }
     // CORE-END
 
@@ -547,12 +605,81 @@
     document.querySelectorAll("input[name=mode]").forEach(r =>
       r.addEventListener("change", () => { S.mode = r.value; setupSweepOptions(); render(); }));
 
+    const SEGS = [{ d: 10, g: 0 }, { d: 8, g: 6 }, { d: 8, g: -6 }];
+    let VMAX = 60;
+    const segEls = [];
+
+    function buildSegRows() {
+      const tb = $("segbody");
+      tb.innerHTML = "";
+      segEls.length = 0;
+      SEGS.forEach((s, i) => {
+        const tr = document.createElement("tr");
+        const td0 = document.createElement("td");
+        td0.textContent = i + 1;
+        const tdD = document.createElement("td");
+        const inD = document.createElement("input");
+        inD.className = "val"; inD.inputMode = "decimal";
+        inD.style.width = "72px"; inD.value = fmtG(s.d);
+        tdD.append(inD);
+        const tdG = document.createElement("td");
+        const inG = document.createElement("input");
+        inG.className = "val"; inG.inputMode = "decimal";
+        inG.style.width = "64px"; inG.value = fmtG(s.g);
+        tdG.append(inG);
+        const tdV = document.createElement("td");
+        const tdT = document.createElement("td");
+        const tdX = document.createElement("td");
+        const bx = document.createElement("button");
+        bx.className = "preset"; bx.textContent = "×";
+        bx.addEventListener("click", () => {
+          SEGS.splice(i, 1); buildSegRows(); render();
+        });
+        tdX.append(bx);
+        tr.append(td0, tdD, tdG, tdV, tdT, tdX);
+        tb.append(tr);
+        const applyD = () => {
+          const x = parseNum(inD.value);
+          if (x !== null) s.d = Math.min(Math.max(x, 0.1), 500);
+          render();
+        };
+        const applyG = () => {
+          const x = parseNum(inG.value);
+          if (x !== null) s.g = Math.min(Math.max(x, -30), 30);
+          render();
+        };
+        inD.addEventListener("change", applyD);
+        inD.addEventListener("keydown", e => { if (e.key === "Enter") applyD(); });
+        inG.addEventListener("change", applyG);
+        inG.addEventListener("keydown", e => { if (e.key === "Enter") applyG(); });
+        segEls.push({ inD: inD, inG: inG, tdV: tdV, tdT: tdT });
+      });
+    }
+
+    $("addseg").addEventListener("click", () => {
+      SEGS.push({ d: 5, g: 0 });
+      buildSegRows(); render();
+    });
+
+    $("vmax").value = fmtG(VMAX);
+    const applyVmax = () => {
+      const x = parseNum($("vmax").value);
+      if (x !== null) VMAX = Math.min(Math.max(x, 20), 120);
+      $("vmax").value = fmtG(VMAX);
+      render();
+    };
+    $("vmax").addEventListener("change", applyVmax);
+    $("vmax").addEventListener("keydown", e => { if (e.key === "Enter") applyVmax(); });
+
+    buildSegRows();
+
     function sweepKeys() {
       const ks = PARAMS.filter(p => !p.special && p.k !== "distance")
         .map(p => p.k);
-      return S.mode === "inverse"
-        ? ks.filter(k => k !== "speed")
-        : ks.filter(k => k !== "power");
+      if (S.mode === "inverse") return ks.filter(k => k !== "speed");
+      if (S.mode === "course")
+        return ks.filter(k => k !== "speed" && k !== "grade");
+      return ks.filter(k => k !== "power");
     }
     function setupSweepOptions() {
       const sel = $("sweepvar");
@@ -563,7 +690,8 @@
         o.value = k; o.textContent = BYKEY[k].lab;
         sel.append(o);
       }
-      sel.value = sweepKeys().includes(cur) ? cur : "grade";
+      sel.value = sweepKeys().includes(cur) ? cur
+        : S.mode === "course" ? "power" : "grade";
       $("delta").value = fmtG(BYKEY[sel.value].step);
     }
     $("sweepvar").addEventListener("change", () => {
@@ -573,6 +701,10 @@
     $("delta").addEventListener("change", render);
 
     function sweepY(base, k, x) {
+      if (S.mode === "course") {
+        const q = Object.assign({}, base, { [k]: x });
+        return 60 * simulateCourse(q, SEGS, Math.max(q.power, 1), VMAX).timeh;
+      }
       if (S.mode === "inverse") {
         if (k === "power") return solveSpeed(base, Math.max(x, 1));
         return solveSpeed(Object.assign({}, base, { [k]: x }),
@@ -629,7 +761,8 @@
       s += `<line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"
         stroke="var(--axis)"/>`;
       s += `<text x="${L + 5}" y="${T + 10}" font-size="12" fill="var(--muted)">
-        ${inv ? "Velocit\u00e0 [km/h]" : "Potenza [W]"}</text>`;
+        ${S.mode === "course" ? "Tempo [min]"
+          : inv ? "Velocit\u00e0 [km/h]" : "Potenza [W]"}</text>`;
       s += `<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle"
         font-size="12" fill="var(--fg)">${p.lab}</text>`;
       let d = "";
@@ -648,6 +781,8 @@
 
     function fillTable(k, base) {
       const inv = S.mode === "inverse";
+      const crs = S.mode === "course";
+      const D = SEGS.reduce((a, s) => a + (s.d > 0 ? s.d : 0), 0);
       let delta = parseNum($("delta").value);
       if (delta === null || delta <= 0) {
         delta = BYKEY[k].step;
@@ -664,7 +799,11 @@
         if (!bad) {
           const y = j === 0 ? y0 : sweepY(base, k, xv);
           const dsign = y - y0 >= 0 ? "+" : "";
-          if (inv) {
+          if (crs) {
+            c2 = fmtHMM(y);
+            c3 = dsign + (y - y0).toFixed(1);
+            c4 = (60 * D / y).toFixed(1);
+          } else if (inv) {
             c2 = y.toFixed(2);
             c3 = dsign + (y - y0).toFixed(2);
             c4 = fmtHMM(60 * base.distance / y);
@@ -679,57 +818,176 @@
           `<td>${c2}</td><td>${c3}</td><td>${c4}</td></tr>`;
       }
       $("sensbody").innerHTML = rows;
-      $("th-out").textContent = inv ? "v [km/h]" : "P [W]";
-      $("th-d").textContent = inv ? "\u0394v [km/h]" : "\u0394P [W]";
+      $("th-out").textContent = crs ? "tempo" : inv ? "v [km/h]" : "P [W]";
+      $("th-d").textContent = crs ? "\u0394T [min]"
+        : inv ? "\u0394v [km/h]" : "\u0394P [W]";
+      $("th-t").textContent = crs ? "v media" : "Tempo";
+    }
+
+    function drawProfile() {
+      const segs = SEGS.filter(s => s.d > 0);
+      const W = 460, H = 150, L = 46, R = 10, T = 12, B = 30;
+      let xt = 0, yt = 0, ymin = 0, ymax = 0;
+      const pts = [[0, 0]];
+      for (const s of segs) {
+        xt += s.d;
+        yt += s.d * 1000 * Math.sin(Math.atan(s.g / 100));
+        pts.push([xt, yt]);
+        if (yt < ymin) ymin = yt;
+        if (yt > ymax) ymax = yt;
+      }
+      if (ymax - ymin < 10) ymax = ymin + 10;
+      const px = v => L + v / xt * (W - L - R);
+      const py = v => H - B - (v - ymin) / (ymax - ymin) * (H - T - B);
+      let s = "";
+      const ystep = nice((ymax - ymin) / 3);
+      for (let yv = Math.ceil(ymin / ystep) * ystep; yv <= ymax + 1e-9;
+        yv += ystep) {
+        s += `<line x1="${L}" y1="${py(yv)}" x2="${W - R}" y2="${py(yv)}"
+          stroke="var(--grid)"/>`;
+        s += `<text x="${L - 6}" y="${py(yv) + 4}" text-anchor="end"
+          font-size="11" fill="var(--muted)">${fmtG(Math.round(yv))}</text>`;
+      }
+      const xstep = nice(xt / 5);
+      for (let xv = 0; xv <= xt + 1e-9; xv += xstep) {
+        s += `<text x="${px(xv)}" y="${H - B + 15}" text-anchor="middle"
+          font-size="11" fill="var(--muted)">${fmtG(Math.round(xv * 10) / 10)}</text>`;
+      }
+      let d = "M" + px(0).toFixed(1) + " " + py(0).toFixed(1);
+      for (let i = 1; i < pts.length; i++) {
+        d += "L" + px(pts[i][0]).toFixed(1) + " " + py(pts[i][1]).toFixed(1);
+      }
+      s += `<path d="${d}L${px(xt).toFixed(1)} ${py(ymin).toFixed(1)}L${px(0).toFixed(1)} ${py(ymin).toFixed(1)}Z"
+        fill="var(--hl)"/>`;
+      s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+      s += `<line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"
+        stroke="var(--axis)"/>`;
+      s += `<text x="${L + 5}" y="${T + 8}" font-size="11"
+        fill="var(--muted)">Quota [m]</text>`;
+      s += `<text x="${(L + W - R) / 2}" y="${H - 2}" text-anchor="middle"
+        font-size="11" fill="var(--fg)">km</text>`;
+      $("profile").innerHTML =
+        `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${s}</svg>`;
     }
 
     function render() {
       const inv = S.mode === "inverse";
+      const crs = S.mode === "course";
+      $("course").style.display = crs ? "" : "none";
       if (inv) S.speed = solveSpeed(S, Math.max(S.power, 1));
-      const r = compute(S);
-      if (!inv) S.power = r.power;
+      const sim = crs
+        ? simulateCourse(S, SEGS, Math.max(S.power, 1), VMAX) : null;
+      const simOk = crs && sim.segs.length > 0;
+      const r = crs ? null : compute(S);
+      if (S.mode === "direct") S.power = r.power;
 
       const act = document.activeElement;
       for (const p of PARAMS) {
         if (p.special) continue;
         const e = els[p.k];
-        e.rng.disabled = (p.k === "speed" && inv) || (p.k === "power" && !inv);
+        e.rng.disabled = (p.k === "speed" && (inv || crs))
+          || (p.k === "power" && S.mode === "direct")
+          || (crs && (p.k === "distance" || p.k === "grade"));
         e.txt.readOnly = e.rng.disabled;
         e.rng.value = Math.min(Math.max(S[p.k], p.min), p.max);
         if (act !== e.txt) {
-          e.txt.value = p.k === "power" && !inv ? r.power.toFixed(1) : fmtG(S[p.k]);
+          e.txt.value = p.k === "power" && S.mode === "direct"
+            ? r.power.toFixed(1)
+            : crs && p.k === "speed"
+              ? (simOk ? sim.vavg.toFixed(1) : "—")
+              : crs && p.k === "distance"
+                ? (simOk ? fmtG(sim.dist) : "—")
+                : fmtG(S[p.k]);
         }
       }
       const tmin = 60 * S.distance / S.speed;
       els.time.rng.min = S.distance;
       els.time.rng.max = 12 * S.distance;
-      els.time.rng.value = tmin;
-      els.time.rng.disabled = inv;
-      els.time.txt.readOnly = inv;
-      if (act !== els.time.txt) els.time.txt.value = fmtHMM(tmin);
+      els.time.rng.value = crs ? els.time.rng.min : tmin;
+      els.time.rng.disabled = inv || crs;
+      els.time.txt.readOnly = inv || crs;
+      if (act !== els.time.txt) {
+        els.time.txt.value = crs
+          ? (simOk ? fmtHMM(60 * sim.timeh) : "—")
+          : fmtHMM(tmin);
+      }
 
-      $("r-power").textContent = Math.round(r.power) + " W";
-      $("r-wkg").textContent = r.wkg.toFixed(2) + " W/kg";
-      $("r-time").textContent = "Tempo: " + fmtTimeLong(r.timeh) +
-        "  (" + S.speed.toFixed(1) + " km/h)";
-      $("r-energy").textContent = "Energia: " + Math.round(r.ekj) +
-        " kJ  (\u2248 " + Math.round(r.kcal) + " kcal bruciate)";
-      $("note").textContent = r.pnet < 0
-        ? "Discesa e/o vento a favore superano le resistenze (" +
-        Math.round(r.pnet) + " W netti): si procede a ruota libera senza pedalare."
-        : "";
+      if (crs) {
+        $("r-power").textContent = simOk ? fmtTimeLong(sim.timeh) : "\u2014";
+        $("r-wkg").textContent = simOk
+          ? sim.vavg.toFixed(1) + " km/h di media \u00b7 " +
+            Math.round(sim.pavg) + " W medi effettivi"
+          : "aggiungi almeno un tratto";
+        $("r-time").textContent = simOk
+          ? "Distanza: " + fmtG(sim.dist) + " km, dislivello +" +
+            Math.round(sim.climb) + " m"
+          : "";
+        $("r-energy").textContent = simOk
+          ? "Energia: " + Math.round(sim.ekj) + " kJ  (\u2248 " +
+            Math.round(sim.kcal) + " kcal bruciate)"
+          : "";
+        $("note").textContent = !simOk ? "" :
+          (sim.capped > 0
+            ? "Velocit\u00e0 limitata a " + fmtG(VMAX) + " km/h su " +
+              sim.capped + (sim.capped === 1 ? " tratto. " : " tratti. ")
+            : "") +
+          (sim.coasting > 0
+            ? "Ruota libera su " + sim.coasting +
+              (sim.coasting === 1 ? " tratto." : " tratti.")
+            : "");
+      } else {
+        $("r-power").textContent = Math.round(r.power) + " W";
+        $("r-wkg").textContent = r.wkg.toFixed(2) + " W/kg";
+        $("r-time").textContent = "Tempo: " + fmtTimeLong(r.timeh) +
+          "  (" + S.speed.toFixed(1) + " km/h)";
+        $("r-energy").textContent = "Energia: " + Math.round(r.ekj) +
+          " kJ  (\u2248 " + Math.round(r.kcal) + " kcal bruciate)";
+        $("note").textContent = r.pnet < 0
+          ? "Discesa e/o vento a favore superano le resistenze (" +
+          Math.round(r.pnet) + " W netti): si procede a ruota libera senza pedalare."
+          : "";
+      }
 
-      const vmax = Math.max(Math.abs(r.paero), r.proll, Math.abs(r.pgrav), 1);
-      $("b-a").style.width = (Math.abs(r.paero) / vmax * 100) + "%";
-      $("w-a").textContent = (r.paero >= 0 ? "+" : "") + Math.round(r.paero) + " W";
-      $("b-r").style.width = (r.proll / vmax * 100) + "%";
-      $("w-r").textContent = Math.round(r.proll) + " W";
-      $("b-g").style.width = (Math.abs(r.pgrav) / vmax * 100) + "%";
-      $("w-g").textContent = (r.pgrav >= 0 ? "+" : "") + Math.round(r.pgrav) + " W";
+      const bda = crs ? (simOk ? sim.eaero : 0) : r.paero;
+      const bdr = crs ? (simOk ? sim.eroll : 0) : r.proll;
+      const bdg = crs ? (simOk ? sim.egrav : 0) : r.pgrav;
+      const bdu = crs ? " kJ" : " W";
+      $("bd-head").textContent = crs
+        ? "Ripartizione dell'energia alla ruota"
+        : "Ripartizione della potenza alla ruota";
+      const vmax = Math.max(Math.abs(bda), bdr, Math.abs(bdg), 1);
+      $("b-a").style.width = (Math.abs(bda) / vmax * 100) + "%";
+      $("w-a").textContent = (bda >= 0 ? "+" : "") + Math.round(bda) + bdu;
+      $("b-r").style.width = (bdr / vmax * 100) + "%";
+      $("w-r").textContent = Math.round(bdr) + bdu;
+      $("b-g").style.width = (Math.abs(bdg) / vmax * 100) + "%";
+      $("w-g").textContent = (bdg >= 0 ? "+" : "") + Math.round(bdg) + bdu;
+
+      if (crs) {
+        SEGS.forEach((s, i) => {
+          const e2 = segEls[i], q = sim.segs[i];
+          if (!e2 || !q) return;
+          if (act !== e2.inD) e2.inD.value = fmtG(s.d);
+          if (act !== e2.inG) e2.inG.value = fmtG(s.g);
+          e2.tdV.textContent = q.v.toFixed(1) + (q.capped ? "*" : "");
+          e2.tdT.textContent = fmtHMM(60 * q.timeh);
+        });
+        $("segtotal").innerHTML = simOk
+          ? "<td>tot</td><td>" + fmtG(sim.dist) + "</td><td></td><td>" +
+            sim.vavg.toFixed(1) + "</td><td>" + fmtHMM(60 * sim.timeh) +
+            "</td><td></td>"
+          : "";
+        if (simOk) drawProfile(); else $("profile").innerHTML = "";
+      }
 
       const k = $("sweepvar").value;
-      drawPlot(k, Object.assign({}, S));
-      fillTable(k, Object.assign({}, S));
+      if (!crs || simOk) {
+        drawPlot(k, Object.assign({}, S));
+        fillTable(k, Object.assign({}, S));
+      } else {
+        $("plot").innerHTML = "";
+        $("sensbody").innerHTML = "";
+      }
     }
 
     setupSweepOptions();

@@ -11,6 +11,11 @@ fra le tre resistenze (aerodinamica, rotolamento, gravità).
 Funziona anche **al contrario**: data la potenza che si intende esprimere,
 calcola la velocità sostenibile e il tempo di percorrenza.
 
+E può **simulare un percorso a tratti**: definito il percorso come sequenza
+di segmenti (distanza + pendenza), data una potenza costante calcola
+velocità e tempo tratto per tratto (con un tetto di velocità in discesa),
+tempo totale, dislivello, energia e profilo altimetrico.
+
 È una **webapp in un unico file** (`index.html`): nessun server, nessuna
 libreria, funziona offline; layout responsive e tema chiaro/scuro automatico.
 Ideale anche da telefono.
@@ -53,8 +58,10 @@ potenza è strettamente crescente in `v`.
 
 ## Funzionalità dell'interfaccia
 
-- **Due modalità**: potenza da velocità/tempo, oppure velocità e tempo da
-  potenza (la potenza diventa input, velocità e tempo diventano output).
+- **Tre modalità**: potenza da velocità/tempo; velocità e tempo da potenza
+  (la potenza diventa input, velocità e tempo diventano output); percorso a
+  tratti (editor di segmenti distanza+pendenza percorsi a potenza costante,
+  con tabella per tratto, totali e profilo altimetrico).
 - **Input doppio**: cursore per esplorare, campo di testo per la precisione
   (accetta punto o virgola; vincolato all'intervallo ma non al passo).
 - **Tempo accoppiato**: il tempo di percorrenza (formato `h:mm`) è legato
@@ -64,7 +71,8 @@ potenza è strettamente crescente in `v`.
   variabile, con le altre congelate ai valori correnti e il punto operativo
   evidenziato; accanto, **tabella di sensibilità** a ±Δ e ±2Δ intorno al
   valore corrente (Δ modificabile, default = passo del cursore) con potenza,
-  scostamento ΔP (o velocità e Δv in modalità inversa) e tempo di percorrenza.
+  scostamento ΔP (o velocità e Δv in modalità inversa) e tempo di percorrenza;
+  in modalità percorso curva e tabella mostrano tempo totale e velocità media.
 
 ## Parametri e valori di default
 
@@ -77,6 +85,7 @@ potenza è strettamente crescente in `v`.
 | Distanza               | 40 km       | 1–300       | non influisce sulla potenza, solo su tempo ed energia                             |
 | Pendenza media         | 0 %         | −10 … +15   |                                                                                   |
 | Vento contrario        | 0 km/h      | −40 … +40   | positivo = contrario, negativo = a favore                                         |
+| Vel. max discesa       | 60 km/h     | 20–120      | solo modalità percorso: dove interviene si pedala meno del target (o ruota libera) |
 | Crr                    | 0.005       | 0.002–0.012 | copertoncini da strada su asfalto                                                 |
 | Densità aria ρ         | 1.225 kg/m³ | 1.00–1.30   | livello del mare, 15 °C; cala in quota                                            |
 | Efficienza η           | 0.975       | 0.90–1.00   | trasmissione a catena                                                             |
@@ -85,12 +94,16 @@ potenza è strettamente crescente in `v`.
 ## Assunzioni e limiti
 
 - **Vento costante e parallelo al moto**: niente raffiche né vento laterale
-  (il vento laterale aumenta il CdA effettivo e non è modellato).
+  (il vento laterale aumenta il CdA effettivo e non è modellato); in
+  modalità percorso lo stesso vento si applica a tutti i tratti.
 - **Moto stazionario**: velocità costante, nessun termine di accelerazione.
 - **Pendenza e velocità medie**: per la non linearità del termine in `v³`,
   la potenza calcolata a velocità media su pendenza media è un *limite
   inferiore* della potenza media su un percorso reale a profilo variabile
-  (disuguaglianza di Jensen).
+  (disuguaglianza di Jensen). La modalità percorso a tratti rimuove in gran
+  parte questo limite simulando ogni segmento (esempio: 20 km a +8 % e
+  20 km a −8 % a 250 W danno 21.5 km/h di media, mentre a 21.5 km/h su
+  pendenza media 0 % basterebbero 67 W).
 - **kcal indicative**: il rendimento metabolico reale varia tra ~20 e 25 %,
   quindi la stima ha un'incertezza dell'ordine del ±15 %.
 - Trigonometria esatta: `θ = arctan(G/100)`; l'approssimazione `sinθ ≈ G/100`
