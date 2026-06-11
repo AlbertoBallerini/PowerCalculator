@@ -10,6 +10,7 @@
   <title>Potenza in bicicletta</title>
   <style>
     :root {
+      color-scheme: light;
       --bg: #faf9f6;
       --fg: #1c1b18;
       --muted: #6e6b63;
@@ -24,16 +25,41 @@
       --axis: #8a877e;
     }
 
+    /* Palette scura: applicata se forzata (data-theme="dark") oppure, in
+       modalità automatica, quando il sistema è scuro e non è forzato il
+       chiaro. I valori sono ripetuti nei due selettori per non perdere
+       l'automatismo via media query mantenendo l'override manuale. */
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #14130f;
+      --fg: #ece9e1;
+      --muted: #a09b8e;
+      --card: #211f18;
+      --track: #393528;
+      --accent: #8c83ee;
+      --aero: #9189ee;
+      --roll: #2dc193;
+      --grav: #f0743f;
+      --hl: #322c52;
+      --grid: #2a2820;
+      --axis: #726f64;
+    }
+
     @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #171613;
-        --fg: #ebe8e1;
-        --muted: #9b988f;
-        --card: #23211c;
-        --track: #3b382f;
-        --hl: #3a3468;
-        --grid: #33312a;
-        --axis: #7a776e;
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #14130f;
+        --fg: #ece9e1;
+        --muted: #a09b8e;
+        --card: #211f18;
+        --track: #393528;
+        --accent: #8c83ee;
+        --aero: #9189ee;
+        --roll: #2dc193;
+        --grav: #f0743f;
+        --hl: #322c52;
+        --grid: #2a2820;
+        --axis: #726f64;
       }
     }
 
@@ -141,6 +167,65 @@
       font: inherit;
       font-size: 13px;
       cursor: pointer
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px
+    }
+
+    button#theme {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border: 1px solid var(--track);
+      background: var(--card);
+      color: var(--fg);
+      border-radius: 999px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap
+    }
+
+    button#theme:hover {
+      border-color: var(--accent)
+    }
+
+    button#theme svg {
+      width: 15px;
+      height: 15px;
+      display: block
+    }
+
+    table.sens select {
+      font: inherit;
+      font-size: 13px;
+      padding: 3px 4px;
+      border: 1px solid var(--track);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--fg)
+    }
+
+    body,
+    .val,
+    button.preset,
+    button#theme,
+    .sweepctl select,
+    .sweepctl input,
+    table.sens select {
+      transition: background-color .18s ease, color .18s ease,
+        border-color .18s ease
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important
+      }
     }
 
     .subhead {
@@ -295,7 +380,11 @@
 
 <body>
   <main>
-    <h1>Potenza in bicicletta</h1>
+    <div class="topbar">
+      <h1>Potenza in bicicletta</h1>
+      <button id="theme" type="button" aria-label="Cambia tema"
+        title="Tema chiaro / scuro / automatico"></button>
+    </div>
 
     <div class="mode">
       Modalit&agrave;:
@@ -310,14 +399,19 @@
     <section id="params"></section>
 
     <section id="course" style="display:none">
-      <div class="subhead">Tratti del percorso (a potenza costante)</div>
+      <div class="subhead">Tratti del percorso</div>
+      <div class="tnote" style="margin:-2px 0 6px">Per ogni tratto scegli se
+        fissare la potenza (&rarr; velocit&agrave; calcolata) o la
+        velocit&agrave; (&rarr; potenza calcolata).</div>
       <table class="sens" id="segtable">
         <thead>
           <tr>
             <th>#</th>
             <th>km</th>
             <th>pend. %</th>
+            <th>dato</th>
             <th>v [km/h]</th>
+            <th>P [W]</th>
             <th>tempo</th>
             <th></th>
           </tr>
@@ -327,7 +421,8 @@
           <tr id="segtotal"></tr>
         </tfoot>
       </table>
-      <div class="tnote">* velocit&agrave; limitata dal tetto in discesa</div>
+      <div class="tnote">cella in grassetto = valore imposto; * velocit&agrave;
+        limitata dal tetto in discesa</div>
       <div class="sweepctl" style="margin-top:8px">
         <button class="preset" id="addseg">+ aggiungi tratto</button>
         vel. max discesa <input id="vmax" inputmode="decimal"> km/h
@@ -440,19 +535,25 @@
       return 0.5 * (lo + hi);
     }
 
-    function simulateCourse(p, segs, target, vmaxKmh) {
+    function simulateCourse(p, segs, vmaxKmh) {
       const cap = vmaxKmh > 0 ? vmaxKmh : Infinity;
       const out = { segs: [], dist: 0, timeh: 0, ekj: 0, eaero: 0,
                     eroll: 0, egrav: 0, climb: 0, capped: 0, coasting: 0 };
       for (const s of segs) {
         if (!(s.d > 0)) continue;
-        const vs = solveSpeed(Object.assign({}, p, { grade: s.g }),
-          Math.max(target, 1));
-        const v = Math.min(vs, cap);
+        let v, capped = false;
+        if (s.by === "speed") {
+          v = s.val;
+        } else {
+          const vs = solveSpeed(Object.assign({}, p, { grade: s.g }),
+            Math.max(s.val, 1));
+          capped = vs > cap;
+          v = Math.min(vs, cap);
+        }
         const r = compute(Object.assign({}, p,
           { grade: s.g, speed: v, distance: s.d }));
-        out.segs.push({ d: s.d, g: s.g, v: v, timeh: r.timeh,
-                        power: r.power, capped: vs > cap });
+        out.segs.push({ d: s.d, g: s.g, by: s.by, v: v, timeh: r.timeh,
+                        power: r.power, capped: capped });
         out.dist += s.d;
         out.timeh += r.timeh;
         out.ekj += r.ekj;
@@ -460,7 +561,7 @@
         out.eroll += r.proll * r.timeh * 3.6;
         out.egrav += r.pgrav * r.timeh * 3.6;
         if (s.g > 0) out.climb += s.d * 1000 * Math.sin(Math.atan(s.g / 100));
-        if (vs > cap) out.capped++;
+        if (capped) out.capped++;
         if (r.power <= 0) out.coasting++;
       }
       out.vavg = out.timeh > 0 ? out.dist / out.timeh : 0;
@@ -605,7 +706,11 @@
     document.querySelectorAll("input[name=mode]").forEach(r =>
       r.addEventListener("change", () => { S.mode = r.value; setupSweepOptions(); render(); }));
 
-    const SEGS = [{ d: 10, g: 0 }, { d: 8, g: 6 }, { d: 8, g: -6 }];
+    const SEGS = [
+      { d: 10, g: 0, by: "speed", val: 32 },
+      { d: 8, g: 6, by: "power", val: 250 },
+      { d: 8, g: -6, by: "power", val: 150 }
+    ];
     let VMAX = 60;
     const segEls = [];
 
@@ -627,16 +732,33 @@
         inG.className = "val"; inG.inputMode = "decimal";
         inG.style.width = "64px"; inG.value = fmtG(s.g);
         tdG.append(inG);
+        if (s.by !== "speed") s.by = "power";
+        const tdBy = document.createElement("td");
+        const sel = document.createElement("select");
+        sel.style.font = "inherit"; sel.style.fontSize = "13px";
+        for (const o of [["power", "P"], ["speed", "v"]]) {
+          const op = document.createElement("option");
+          op.value = o[0]; op.textContent = o[1];
+          sel.append(op);
+        }
+        sel.value = s.by;
+        tdBy.append(sel);
         const tdV = document.createElement("td");
+        const tdP = document.createElement("td");
         const tdT = document.createElement("td");
         const tdX = document.createElement("td");
+        const inVal = document.createElement("input");
+        inVal.className = "val"; inVal.inputMode = "decimal";
+        inVal.style.width = "64px"; inVal.style.fontWeight = "600";
+        inVal.value = fmtG(s.val);
+        (s.by === "speed" ? tdV : tdP).append(inVal);
         const bx = document.createElement("button");
         bx.className = "preset"; bx.textContent = "×";
         bx.addEventListener("click", () => {
           SEGS.splice(i, 1); buildSegRows(); render();
         });
         tdX.append(bx);
-        tr.append(td0, tdD, tdG, tdV, tdT, tdX);
+        tr.append(td0, tdD, tdG, tdBy, tdV, tdP, tdT, tdX);
         tb.append(tr);
         const applyD = () => {
           const x = parseNum(inD.value);
@@ -648,16 +770,40 @@
           if (x !== null) s.g = Math.min(Math.max(x, -30), 30);
           render();
         };
+        const applyVal = () => {
+          const x = parseNum(inVal.value);
+          if (x !== null) s.val = s.by === "speed"
+            ? Math.min(Math.max(x, 1), 120)
+            : Math.min(Math.max(x, 1), 2000);
+          render();
+        };
+        sel.addEventListener("change", () => {
+          if (sel.value === s.by) return;
+          const cap = VMAX > 0 ? VMAX : Infinity;
+          if (sel.value === "speed") {
+            const vs = solveSpeed(Object.assign({}, S, { grade: s.g }),
+              Math.max(s.val, 1));
+            s.val = Math.round(Math.min(vs, cap) * 10) / 10;
+          } else {
+            s.val = Math.round(compute(Object.assign({}, S,
+              { grade: s.g, speed: s.val })).power);
+          }
+          s.by = sel.value;
+          buildSegRows(); render();
+        });
         inD.addEventListener("change", applyD);
         inD.addEventListener("keydown", e => { if (e.key === "Enter") applyD(); });
         inG.addEventListener("change", applyG);
         inG.addEventListener("keydown", e => { if (e.key === "Enter") applyG(); });
-        segEls.push({ inD: inD, inG: inG, tdV: tdV, tdT: tdT });
+        inVal.addEventListener("change", applyVal);
+        inVal.addEventListener("keydown", e => { if (e.key === "Enter") applyVal(); });
+        segEls.push({ inD: inD, inG: inG, inVal: inVal,
+                      tdV: tdV, tdP: tdP, tdT: tdT });
       });
     }
 
     $("addseg").addEventListener("click", () => {
-      SEGS.push({ d: 5, g: 0 });
+      SEGS.push({ d: 5, g: 0, by: "power", val: 200 });
       buildSegRows(); render();
     });
 
@@ -678,7 +824,7 @@
         .map(p => p.k);
       if (S.mode === "inverse") return ks.filter(k => k !== "speed");
       if (S.mode === "course")
-        return ks.filter(k => k !== "speed" && k !== "grade");
+        return ks.filter(k => k !== "power" && k !== "speed" && k !== "grade");
       return ks.filter(k => k !== "power");
     }
     function setupSweepOptions() {
@@ -691,7 +837,7 @@
         sel.append(o);
       }
       sel.value = sweepKeys().includes(cur) ? cur
-        : S.mode === "course" ? "power" : "grade";
+        : S.mode === "course" ? "cda" : "grade";
       $("delta").value = fmtG(BYKEY[sel.value].step);
     }
     $("sweepvar").addEventListener("change", () => {
@@ -703,7 +849,7 @@
     function sweepY(base, k, x) {
       if (S.mode === "course") {
         const q = Object.assign({}, base, { [k]: x });
-        return 60 * simulateCourse(q, SEGS, Math.max(q.power, 1), VMAX).timeh;
+        return 60 * simulateCourse(q, SEGS, VMAX).timeh;
       }
       if (S.mode === "inverse") {
         if (k === "power") return solveSpeed(base, Math.max(x, 1));
@@ -875,8 +1021,7 @@
       const crs = S.mode === "course";
       $("course").style.display = crs ? "" : "none";
       if (inv) S.speed = solveSpeed(S, Math.max(S.power, 1));
-      const sim = crs
-        ? simulateCourse(S, SEGS, Math.max(S.power, 1), VMAX) : null;
+      const sim = crs ? simulateCourse(S, SEGS, VMAX) : null;
       const simOk = crs && sim.segs.length > 0;
       const r = crs ? null : compute(S);
       if (S.mode === "direct") S.power = r.power;
@@ -886,18 +1031,28 @@
         if (p.special) continue;
         const e = els[p.k];
         e.rng.disabled = (p.k === "speed" && (inv || crs))
-          || (p.k === "power" && S.mode === "direct")
+          || (p.k === "power" && (S.mode === "direct" || crs))
           || (crs && (p.k === "distance" || p.k === "grade"));
         e.txt.readOnly = e.rng.disabled;
-        e.rng.value = Math.min(Math.max(S[p.k], p.min), p.max);
+        let rngv = S[p.k];
+        if (simOk && p.k === "speed") rngv = sim.vavg;
+        else if (simOk && p.k === "power") rngv = sim.pavg;
+        else if (simOk && p.k === "distance") rngv = sim.dist;
+        e.rng.value = Math.min(Math.max(rngv, p.min), p.max);
         if (act !== e.txt) {
-          e.txt.value = p.k === "power" && S.mode === "direct"
-            ? r.power.toFixed(1)
-            : crs && p.k === "speed"
-              ? (simOk ? sim.vavg.toFixed(1) : "—")
-              : crs && p.k === "distance"
-                ? (simOk ? fmtG(sim.dist) : "—")
-                : fmtG(S[p.k]);
+          let v;
+          if (crs && p.k === "speed") {
+            v = simOk ? sim.vavg.toFixed(1) : "—";
+          } else if (crs && p.k === "power") {
+            v = simOk ? sim.pavg.toFixed(1) : "—";
+          } else if (crs && p.k === "distance") {
+            v = simOk ? fmtG(sim.dist) : "—";
+          } else if (p.k === "power" && S.mode === "direct") {
+            v = r.power.toFixed(1);
+          } else {
+            v = fmtG(S[p.k]);
+          }
+          e.txt.value = v;
         }
       }
       const tmin = 60 * S.distance / S.speed;
@@ -916,7 +1071,7 @@
         $("r-power").textContent = simOk ? fmtTimeLong(sim.timeh) : "\u2014";
         $("r-wkg").textContent = simOk
           ? sim.vavg.toFixed(1) + " km/h di media \u00b7 " +
-            Math.round(sim.pavg) + " W medi effettivi"
+            Math.round(sim.pavg) + " W medi"
           : "aggiungi almeno un tratto";
         $("r-time").textContent = simOk
           ? "Distanza: " + fmtG(sim.dist) + " km, dislivello +" +
@@ -932,8 +1087,9 @@
               sim.capped + (sim.capped === 1 ? " tratto. " : " tratti. ")
             : "") +
           (sim.coasting > 0
-            ? "Ruota libera su " + sim.coasting +
-              (sim.coasting === 1 ? " tratto." : " tratti.")
+            ? "Potenza nulla su " + sim.coasting +
+              (sim.coasting === 1 ? " tratto" : " tratti") +
+              " (a ruota libera o frenando)."
             : "");
       } else {
         $("r-power").textContent = Math.round(r.power) + " W";
@@ -969,13 +1125,19 @@
           if (!e2 || !q) return;
           if (act !== e2.inD) e2.inD.value = fmtG(s.d);
           if (act !== e2.inG) e2.inG.value = fmtG(s.g);
-          e2.tdV.textContent = q.v.toFixed(1) + (q.capped ? "*" : "");
+          if (act !== e2.inVal) e2.inVal.value = fmtG(s.val);
+          if (s.by === "speed") {
+            e2.tdP.textContent = Math.round(q.power);
+          } else {
+            e2.tdV.textContent = q.v.toFixed(1) + (q.capped ? "*" : "");
+          }
           e2.tdT.textContent = fmtHMM(60 * q.timeh);
         });
         $("segtotal").innerHTML = simOk
-          ? "<td>tot</td><td>" + fmtG(sim.dist) + "</td><td></td><td>" +
-            sim.vavg.toFixed(1) + "</td><td>" + fmtHMM(60 * sim.timeh) +
-            "</td><td></td>"
+          ? "<td>tot</td><td>" + fmtG(sim.dist) +
+            "</td><td></td><td></td><td>" + sim.vavg.toFixed(1) +
+            "</td><td>" + Math.round(sim.pavg) + "</td><td>" +
+            fmtHMM(60 * sim.timeh) + "</td><td></td>"
           : "";
         if (simOk) drawProfile(); else $("profile").innerHTML = "";
       }
@@ -992,6 +1154,64 @@
 
     setupSweepOptions();
     render();
+
+    // --- Tema: Auto / Chiaro / Scuro, con preferenza persistita ---
+    const THEMES = {
+      auto: {
+        lab: "Auto",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<rect x="2" y="4" width="20" height="14" rx="2"/>' +
+          '<path d="M8 21h8M12 18v3"/></svg>'
+      },
+      light: {
+        lab: "Chiaro",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v2.5M12 20v2.5' +
+          'M3.5 12H1M23 12h-2.5M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7' +
+          'M6.7 17.3 5 19"/></svg>'
+      },
+      dark: {
+        lab: "Scuro",
+        icon: '<svg viewBox="0 0 24 24" fill="currentColor">' +
+          '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+      }
+    };
+    const ORDER = ["auto", "light", "dark"];
+    const META_BG = { light: "#faf9f6", dark: "#14130f" };
+    const root = document.documentElement;
+    const themeBtn = $("theme");
+
+    function readTheme() {
+      try {
+        const t = localStorage.getItem("theme");
+        return THEMES[t] ? t : "auto";
+      } catch (e) { return "auto"; }
+    }
+    function effectiveDark(t) {
+      return t === "dark" || (t === "auto" &&
+        matchMedia("(prefers-color-scheme: dark)").matches);
+    }
+    function applyTheme(t) {
+      if (t === "auto") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", t);
+      themeBtn.innerHTML = THEMES[t].icon +
+        "<span>" + THEMES[t].lab + "</span>";
+      const m = document.querySelector('meta[name="theme-color"]');
+      if (m) m.content = META_BG[effectiveDark(t) ? "dark" : "light"];
+    }
+
+    let theme = readTheme();
+    applyTheme(theme);
+    themeBtn.addEventListener("click", () => {
+      theme = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length];
+      try { localStorage.setItem("theme", theme); } catch (e) { }
+      applyTheme(theme);
+    });
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (theme === "auto") applyTheme("auto");
+    });
   </script>
 </body>
 

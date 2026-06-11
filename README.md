@@ -12,12 +12,15 @@ Funziona anche **al contrario**: data la potenza che si intende esprimere,
 calcola la velocità sostenibile e il tempo di percorrenza.
 
 E può **simulare un percorso a tratti**: definito il percorso come sequenza
-di segmenti (distanza + pendenza), data una potenza costante calcola
-velocità e tempo tratto per tratto (con un tetto di velocità in discesa),
-tempo totale, dislivello, energia e profilo altimetrico.
+di segmenti (distanza + pendenza), per **ogni tratto** scegli se imporre la
+potenza (e ottenere la velocità, con un tetto di velocità in discesa) oppure
+la velocità (e ottenere la potenza richiesta) — per esempio velocità fissa
+in pianura e potenza fissa in salita. Restituisce tempo totale, dislivello,
+energia, velocità e potenza medie e il profilo altimetrico.
 
 È una **webapp in un unico file** (`index.html`): nessun server, nessuna
-libreria, funziona offline; layout responsive e tema chiaro/scuro automatico.
+libreria, funziona offline; layout responsive e tema chiaro/scuro (Auto,
+Chiaro o Scuro a scelta, con la preferenza ricordata sul dispositivo).
 Ideale anche da telefono.
 
 ## Uso
@@ -60,8 +63,10 @@ potenza è strettamente crescente in `v`.
 
 - **Tre modalità**: potenza da velocità/tempo; velocità e tempo da potenza
   (la potenza diventa input, velocità e tempo diventano output); percorso a
-  tratti (editor di segmenti distanza+pendenza percorsi a potenza costante,
-  con tabella per tratto, totali e profilo altimetrico).
+  tratti (editor di segmenti distanza+pendenza, con tabella per tratto,
+  totali e profilo altimetrico). Nella modalità percorso ogni tratto sceglie
+  in autonomia se il dato imposto è la potenza (→ velocità calcolata) o la
+  velocità (→ potenza calcolata).
 - **Input doppio**: cursore per esplorare, campo di testo per la precisione
   (accetta punto o virgola; vincolato all'intervallo ma non al passo).
 - **Tempo accoppiato**: il tempo di percorrenza (formato `h:mm`) è legato
@@ -72,7 +77,9 @@ potenza è strettamente crescente in `v`.
   evidenziato; accanto, **tabella di sensibilità** a ±Δ e ±2Δ intorno al
   valore corrente (Δ modificabile, default = passo del cursore) con potenza,
   scostamento ΔP (o velocità e Δv in modalità inversa) e tempo di percorrenza;
-  in modalità percorso curva e tabella mostrano tempo totale e velocità media.
+  in modalità percorso curva e tabella mostrano il tempo totale al variare
+  del parametro scelto (potenza e velocità sono escluse perché definite dai
+  singoli tratti).
 
 ## Parametri e valori di default
 
@@ -85,7 +92,7 @@ potenza è strettamente crescente in `v`.
 | Distanza               | 40 km       | 1–300       | non influisce sulla potenza, solo su tempo ed energia                             |
 | Pendenza media         | 0 %         | −10 … +15   |                                                                                   |
 | Vento contrario        | 0 km/h      | −40 … +40   | positivo = contrario, negativo = a favore                                         |
-| Vel. max discesa       | 60 km/h     | 20–120      | solo modalità percorso: dove interviene si pedala meno del target (o ruota libera) |
+| Vel. max discesa       | 60 km/h     | 20–120      | solo modalità percorso, sui tratti a potenza imposta: dove interviene si pedala meno del valore impostato (o a ruota libera) |
 | Crr                    | 0.005       | 0.002–0.012 | copertoncini da strada su asfalto                                                 |
 | Densità aria ρ         | 1.225 kg/m³ | 1.00–1.30   | livello del mare, 15 °C; cala in quota                                            |
 | Efficienza η           | 0.975       | 0.90–1.00   | trasmissione a catena                                                             |
@@ -101,9 +108,10 @@ potenza è strettamente crescente in `v`.
   la potenza calcolata a velocità media su pendenza media è un *limite
   inferiore* della potenza media su un percorso reale a profilo variabile
   (disuguaglianza di Jensen). La modalità percorso a tratti rimuove in gran
-  parte questo limite simulando ogni segmento (esempio: 20 km a +8 % e
-  20 km a −8 % a 250 W danno 21.5 km/h di media, mentre a 21.5 km/h su
-  pendenza media 0 % basterebbero 67 W).
+  parte questo limite simulando ogni segmento; impostando la velocità sui
+  tratti lo si tocca con mano (tenere 30 km/h su 10 km piani + 8 km al +6 %
+  + 8 km al −6 % richiede 227 W medi, contro i 150 W che servirebbero a
+  30 km/h su pendenza media 0 %).
 - **kcal indicative**: il rendimento metabolico reale varia tra ~20 e 25 %,
   quindi la stima ha un'incertezza dell'ordine del ±15 %.
 - Trigonometria esatta: `θ = arctan(G/100)`; l'approssimazione `sinθ ≈ G/100`

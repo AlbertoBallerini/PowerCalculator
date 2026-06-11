@@ -14,10 +14,13 @@ Calcolatore della potenza necessaria per percorrere un tratto in bicicletta
 media, vento contrario/a favore, più Crr/ρ/η come parametri avanzati).
 Output: potenza, W/kg, tempo,
 energia, kcal, ripartizione fra resistenza aerodinamica / rotolamento /
-gravità. Ha la modalità inversa (da potenza → velocità e tempo), la modalità
-**percorso a tratti** (sequenza di tratti distanza+pendenza percorsi a
-potenza costante, con tetto di velocità in discesa, profilo altimetrico e
-totali di tempo/energia/dislivello) e un pannello di analisi di sensibilità
+gravità. Ha la modalità inversa (da potenza → velocità e tempo) e la modalità
+**percorso a tratti**: una sequenza di tratti (distanza + pendenza) dove per
+**ogni tratto** si sceglie indipendentemente se imporre la potenza (→ velocità
+calcolata, con tetto di velocità in discesa) o la velocità (→ potenza
+calcolata) — es. velocità fissa in pianura, potenza fissa in salita. Restituisce
+profilo altimetrico, totali di tempo/energia/dislivello, velocità e potenza
+medie. C'è inoltre un pannello di analisi di sensibilità
 a una variabile. Lingua dell'interfaccia
 e dei commenti: **italiano**; identificatori di codice: **inglese**.
 
@@ -25,7 +28,7 @@ e dei commenti: **italiano**; identificatori di codice: **inglese**.
 
 | File | Ruolo | Note |
 |---|---|---|
-| `index.html` | Webapp — unico sorgente del progetto | **Unico file autosufficiente**: vanilla JS, zero dipendenze, zero rete, dark mode via `prefers-color-scheme`, responsive. Si chiama `index.html` per poter essere servito così com'è da GitHub Pages. Il core fisico è delimitato dai marcatori `// CORE-BEGIN` / `// CORE-END` (estraibile e testabile fuori dal browser): `compute(p)`, `solveSpeed(p, target)` e `simulateCourse(p, segs, target, vmaxKmh)`. Stato nell'oggetto `S`, parametri nell'array `PARAMS`, righe UI generate da `buildRow()`, rendering centralizzato in `render()`, grafico SVG costruito come stringa in `drawPlot()`, tabella di sensibilità in `fillTable()`. Modalità percorso: tratti in `SEGS` (array di `{d, g}`), tetto in `VMAX`, editor generato da `buildSegRows()`, profilo altimetrico in `drawProfile()`. Deve restare un singolo file. |
+| `index.html` | Webapp — unico sorgente del progetto | **Unico file autosufficiente**: vanilla JS, zero dipendenze, zero rete, responsive. Tema chiaro/scuro: selettore Auto/Chiaro/Scuro (pulsante `#theme` in alto a destra) gestito via attributo `data-theme` su `<html>` e variabili CSS; in `auto` segue `prefers-color-scheme`; la scelta è persistita in `localStorage` (`theme`); `color-scheme` e il `<meta name="theme-color">` sono aggiornati di conseguenza. Si chiama `index.html` per poter essere servito così com'è da GitHub Pages. Il core fisico è delimitato dai marcatori `// CORE-BEGIN` / `// CORE-END` (estraibile e testabile fuori dal browser): `compute(p)`, `solveSpeed(p, target)` e `simulateCourse(p, segs, vmaxKmh)` dove ogni tratto è `{d, g, by, val}` (`by` = `"power"` → `val` è una potenza W; `by` = `"speed"` → `val` è una velocità km/h e il tetto non si applica). Stato nell'oggetto `S` (`S.mode` = `direct`/`inverse`/`course`), parametri nell'array `PARAMS`, righe UI generate da `buildRow()`, rendering centralizzato in `render()`, grafico SVG costruito come stringa in `drawPlot()`, tabella di sensibilità in `fillTable()`. Modalità percorso: tratti in `SEGS` (array di `{d, g, by, val}`), tetto in `VMAX`, editor generato da `buildSegRows()` (per tratto: input distanza/pendenza, select `dato` P/v, e la cella v o P corrispondente diventa l'input in grassetto mentre l'altra è calcolata), profilo altimetrico in `drawProfile()`. Deve restare un singolo file. |
 | `README.md` | Documentazione utente | Contiene formula, tabella dei default/intervalli, assunzioni del modello, riferimenti (Martin et al. 1998; calcolatore Gribble). |
 
 ## Modello fisico (fonte di verità)
@@ -49,11 +52,20 @@ Convenzioni implementative da preservare:
 - modalità inversa: bisezione di `P(v) = target` su v ∈ [0.1, 200] km/h con
   espansione del bracket; la soluzione è unica (oltre la velocità terminale
   P è strettamente crescente);
-- modalità percorso: ogni tratto è percorso a `v = min(solveSpeed(P_target),
-  v_max)`; le grandezze del tratto (potenza effettiva, energia, componenti)
-  sono ricalcolate con `compute` alla velocità finale, quindi dove il tetto
-  interviene la potenza effettiva scende sotto il target (fino a 0 = ruota
-  libera); dislivello = Σ d·sin(atan(g/100)) sui soli tratti in salita.
+- modalità percorso, tratto con `by="power"`: percorso a
+  `v = min(solveSpeed(val), v_max)`; le grandezze (potenza effettiva, energia,
+  componenti) sono ricalcolate con `compute` alla velocità finale, quindi dove
+  il tetto interviene la potenza effettiva scende sotto `val` (fino a 0 = ruota
+  libera);
+- modalità percorso, tratto con `by="speed"`: percorso a `v = val` (il tetto
+  non si applica); la potenza è `compute(...).power`, che è 0 dove servirebbe
+  frenare (discesa o vento a favore sotto la velocità terminale);
+- totali del percorso: dislivello = Σ d·sin(atan(g/100)) sui soli tratti in
+  salita; velocità media = Σd / Σt; potenza media pesata sull'energia
+  (`pavg = ekj/3.6/timeh` = lavoro totale / tempo totale), **non** la media
+  aritmetica delle potenze di tratto. Tenere la velocità fissa su un profilo
+  vario fa emergere Jensen: la potenza media supera quella calcolata a
+  pendenza media.
 
 ## Invarianti di progetto (non violare)
 
@@ -66,17 +78,18 @@ Convenzioni implementative da preservare:
    cursore ma **non al passo**.
 4. Tempo ↔ velocità accoppiati via distanza: t ∈ [d, 12·d] minuti perché
    v ∈ [5, 60] km/h; campo tempo in formato `h:mm` (o minuti). In modalità
-   percorso velocità media, tempo totale e distanza compaiono negli stessi
-   campi come output di sola lettura.
+   percorso i campi globali `speed`, `power`, `time`, `distance` sono tutti
+   output di sola lettura e mostrano i totali del percorso (velocità media,
+   potenza media, tempo totale, distanza totale); gli input sono per-tratto.
 5. Confronto a una variabile: esclude sempre `distance`; in diretta esclude
-   `power`, in inversa esclude `speed` e include `power`, in percorso
-   esclude `speed` e `grade` (definiti dai tratti). Tabella di
-   sensibilità a ±Δ e ±2Δ (Δ modificabile, default = passo del cursore);
+   `power`, in inversa esclude `speed` e include `power`, in percorso esclude
+   `power`, `speed` e `grade` (output globali o definiti dai tratti). Tabella
+   di sensibilità a ±Δ e ±2Δ (Δ modificabile, default = passo del cursore);
    colonne: diretta `valore | P | ΔP | tempo`, inversa `valore | v | Δv |
    tempo`, percorso `valore | tempo | ΔT [min] | v media` (y del grafico =
-   tempo totale [min]; fallback del menu a tendina = `power`, altrove
-   `grade`). In diretta il tempo varia solo se la variabile è la velocità
-   (è corretto così: t = d/v).
+   tempo totale [min]). Fallback del menu a tendina: `cda` in percorso,
+   `grade` altrove. In diretta il tempo varia solo se la variabile è la
+   velocità (è corretto così: t = d/v).
 
 ## Valori di regressione (tutti verificati; tolleranza ±0.1 W)
 
@@ -98,10 +111,12 @@ Crr 0.005, ρ 1.225, η 0.975.
 | Vento −40, 20 km/h, piano | P = 0 W, netto alla ruota = −11.8 W |
 | Velocità terminale in piano, vento −40 | ≈ 23.9 km/h (`solveSpeed(p, 1)` dà 24.19: punto a 1 W, poco sopra) |
 | Inversa: 250 W, vento +10 | v = 30.52 km/h |
-| Percorso [40 km 0 %] a 149.87 W | v media 30.00 km/h, 80 min (parità con la diretta) |
-| Percorso [10 km 0 %, 8 +6 %, 8 −6 %] a 200 W, tetto 60 | T = 62.49 min (1:02), v = [33.54, 13.12, 60 col tetto], P effettive [200, 200, 194.2] W (media 199.3), +479 m, 747 kJ |
-| Stesso percorso, vento +10 | T = 70.90 min |
-| Jensen: [20 km +8 %, 20 −8 %] a 250 W senza tetto | v media 21.48 km/h (T 111.7 min); a 21.48 km/h su pendenza media 0 % basterebbero 66.7 W |
+| Percorso [1 tratto 40 km 0 % `by:power` 149.87] | v media 30.00 km/h, 80 min (parità con la diretta) |
+| Percorso [40 km 0 % `by:speed` 30] | P media 149.87 W, 80 min (parità con la diretta) |
+| Percorso default misto [10 km 0 % v32, 8 +6 % P250, 8 −6 % P150], tetto 60 | v per tratto [32, 16.01, 58.67], P per tratto [177, 250, 150], capped 0, coasting 0; v media 27.41 km/h, P media 211.6 W, T 56.91 min, +479 m, 722 kJ |
+| Tratto [5 km −6 % `by:power` 300], tetto 50 | limitato a 50 km/h, P = 0 (capped e ruota libera insieme) |
+| Tratto [5 km −8 % `by:speed` 35] | P = 0 (si frena per tenere 35 km/h) |
+| Jensen [20 km +8 % v21.48, 20 −8 % v21.48] | P media > 66.7 W (a 21.48 km/h su pendenza media 0 % basterebbero 66.7 W) |
 
 ## Come testare
 
@@ -114,8 +129,10 @@ const base = {rider:72, bike:8, cda:0.32, speed:30, distance:40,
 compute(base).power                                // atteso: 149.87
 compute(Object.assign({}, base, {wind:10})).power  // atteso: 240.35
 solveSpeed(base, 250)                              // atteso: 36.48
-simulateCourse(base, [{d:10,g:0},{d:8,g:6},{d:8,g:-6}], 200, 60)
-// atteso: timeh*60 = 62.49, capped = 1, climb ≈ 479
+simulateCourse(base, [{d:10,g:0,by:"speed",val:32},
+  {d:8,g:6,by:"power",val:250}, {d:8,g:-6,by:"power",val:150}], 60)
+// atteso: pavg = 211.6, vavg = 27.41, timeh*60 = 56.91, climb ≈ 479,
+//         segs[].power = [177, 250, 150], segs[].v = [32, 16.01, 58.67]
 ```
 
 Se è disponibile Node (non richiesto dal progetto), il core si può
